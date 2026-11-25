@@ -1,0 +1,22 @@
+spring:
+  application:
+    name: community-service
+  profiles:
+    default: local
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/wfc}
+    username: ${DATABASE_USERNAME:wfc}
+    password: ${DATABASE_PASSWORD:wfc}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health

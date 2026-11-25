@@ -1,0 +1,40 @@
+services:
+  community-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wfc
+      POSTGRES_USER: wfc
+      POSTGRES_PASSWORD: wfc
+    ports:
+      - "5432:5432"
+    volumes:
+      - community-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wfc -d wfc"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  community-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DATABASE_URL: jdbc:postgresql://community-db:5432/wfc
+      DATABASE_USERNAME: wfc
+      DATABASE_PASSWORD: wfc
+    depends_on:
+      community-db:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - community-service
+
+volumes:
+  community-data:
