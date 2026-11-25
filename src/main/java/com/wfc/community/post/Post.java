@@ -1,5 +1,6 @@
 package com.wfc.community.post;
 
+import com.wfc.community.auth.UserAccount;
 import com.wfc.community.community.Community;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -25,6 +26,10 @@ public class Post {
     @JoinColumn(name = "community_id", nullable = false)
     private Community community;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "user_id")
+    private UserAccount user;
+
     @Column(name = "author_name", nullable = false, length = 40)
     private String authorName;
 
@@ -38,9 +43,10 @@ public class Post {
     protected Post() {
     }
 
-    Post(Community community, String authorName, String content) {
+    Post(Community community, UserAccount user, String content) {
         this.community = community;
-        this.authorName = authorName;
+        this.user = user;
+        this.authorName = user.getDisplayName();
         this.content = content;
     }
 
@@ -53,7 +59,11 @@ public class Post {
     }
 
     public String getAuthorName() {
-        return authorName;
+        return user == null ? authorName : user.getDisplayName();
+    }
+
+    public UserAccount getUser() {
+        return user;
     }
 
     public String getContent() {

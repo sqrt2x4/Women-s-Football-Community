@@ -19,7 +19,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { api, type Comment, type Community, type Post } from "./api";
+import { api, ApiError, type Comment, type Community, type Post, type User } from "./api";
 
 type FeedPost = Post & { comments: Comment[] };
 
@@ -46,18 +46,20 @@ function App() {
   const [communities, setCommunities] = useState<Community[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [feed, setFeed] = useState<FeedPost[]>([]);
-  const [displayName, setDisplayName] = useState(() => localStorage.getItem("wfc-display-name") ?? "");
-  const [joinedIds, setJoinedIds] = useState<string[]>(() => JSON.parse(localStorage.getItem("wfc-joined") ?? "[]") as string[]);
+  const [user, setUser] = useState<User | null>(null);
+  const [joinedIds, setJoinedIds] = useState<string[]>([]);
   const [search, setSearch] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
+  const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [postText, setPostText] = useState("");
   const [commentText, setCommentText] = useState<Record<string, string>>({});
 
   const selected = communities.find((community) => community.id === selectedId) ?? null;
+  const displayName = user?.displayName ?? "";
   const joined = selected ? joinedIds.includes(selected.id) : false;
   const filtered = useMemo(() =>
     communities.filter((community) =>
@@ -66,20 +68,25 @@ function App() {
 
   async function loadCommunities(selectFirst = false) {
     try {
-      let data = await api.communities();
-      if (data.length === 0) {
-        await Promise.all(initialCommunities.map((community) =>
-          api.createCommunity(community).catch((error: unknown) => {
-            if (!(error instanceof Error) || !error.message.includes("already exists")) throw error;
-          })));
-        data = await api.communities();
-      }
+      const data = await api.communities();
       setCommunities(data);
       if (selectFirst && data.length) setSelectedId(data[0].id);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Could not load communities");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function refreshMemberships() {
+    if (!user) {
+      setJoinedIds([]);
+      return;
+    }
+    try {
+      setJoinedIds(await api.myMemberships());
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not load memberships");
     }
   }
 
@@ -96,42 +103,58 @@ function App() {
     }
   }
 
-  useEffect(() => { void loadCommunities(true); }, []);
+  useEffect(() => {
+    void (async () => {
+      try {
+        await api.csrf();
+        try {
+          setUser(await api.me());
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 401) throw error;
+        }
+        await loadCommunities(true);
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "Could not connect to the community service");
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  useEffect(() => { void refreshMemberships(); }, [user]);
+
   useEffect(() => {
     if (selectedId) void loadFeed(selectedId);
     else setFeed([]);
   }, [selectedId]);
 
-  function rememberName(name: string) {
-    const trimmed = name.trim();
-    if (!trimmed) {
-      setMessage("Add your display name first.");
-      setShowProfile(true);
-      return null;
+  function openAuthentication() {
+    setAuthMode("login");
+    setShowProfile(true);
+  }
+
+  function openCreateCommunity() {
+    if (!user) {
+      openAuthentication();
+      setMessage("Sign in to create a community.");
+      return;
     }
-    localStorage.setItem("wfc-display-name", trimmed);
-    setDisplayName(trimmed);
-    setShowProfile(false);
-    return trimmed;
+    setShowCreate(true);
   }
 
   async function toggleMembership() {
     if (!selected) return;
-    const name = rememberName(displayName);
-    if (!name) return;
+    if (!user) {
+      openAuthentication();
+      return;
+    }
     setSaving(true);
     try {
       if (joined) {
-        await api.leave(selected.id, name);
-        const next = joinedIds.filter((id) => id !== selected.id);
-        setJoinedIds(next);
-        localStorage.setItem("wfc-joined", JSON.stringify(next));
+        await api.leave(selected.id);
       } else {
-        await api.join(selected.id, name);
-        const next = [...joinedIds, selected.id];
-        setJoinedIds(next);
-        localStorage.setItem("wfc-joined", JSON.stringify(next));
+        await api.join(selected.id);
       }
+      await refreshMemberships();
       await loadCommunities();
       setMessage(joined ? "You left the community." : `Welcome to ${selected.name}!`);
     } catch (error) {
@@ -144,11 +167,13 @@ function App() {
   async function submitPost(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selected || !postText.trim()) return;
-    const name = rememberName(displayName);
-    if (!name) return;
+    if (!user) {
+      openAuthentication();
+      return;
+    }
     setSaving(true);
     try {
-      await api.createPost(selected.id, name, postText.trim());
+      await api.createPost(selected.id, postText.trim());
       setPostText("");
       await loadFeed(selected.id);
     } catch (error) {
@@ -162,10 +187,12 @@ function App() {
     event.preventDefault();
     const content = commentText[postId]?.trim();
     if (!content) return;
-    const name = rememberName(displayName);
-    if (!name) return;
+    if (!user) {
+      openAuthentication();
+      return;
+    }
     try {
-      await api.createComment(postId, name, content);
+      await api.createComment(postId, content);
       setCommentText((current) => ({ ...current, [postId]: "" }));
       if (selectedId) await loadFeed(selectedId);
     } catch (error) {
@@ -173,8 +200,48 @@ function App() {
     }
   }
 
+  async function submitAuthentication(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    setSaving(true);
+    try {
+      const authenticatedUser = authMode === "register"
+        ? await api.register({
+          email,
+          password,
+          displayName: String(form.get("displayName") ?? "").trim(),
+        })
+        : await api.login({ email, password });
+      setUser(authenticatedUser);
+      setShowProfile(false);
+      setMessage(`Welcome${authMode === "register" ? " to the touchline" : " back"}, ${authenticatedUser.displayName}!`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not sign in");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function signOut() {
+    try {
+      await api.logout();
+      setUser(null);
+      setJoinedIds([]);
+      setShowProfile(false);
+      setMessage("You have signed out.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Could not sign out");
+    }
+  }
+
   async function createCommunity(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!user) {
+      openAuthentication();
+      return;
+    }
     const form = new FormData(event.currentTarget);
     const name = String(form.get("name") ?? "").trim();
     const description = String(form.get("description") ?? "").trim();
@@ -206,8 +273,8 @@ function App() {
         <div className="top-actions">
           <a className="api-link" href="/swagger-ui.html">API docs <ArrowDownRight size={14} /></a>
           <button className="icon-btn notification-btn" aria-label="Notifications (coming soon)" title="Notifications are coming soon"><Bell size={19} /><i /></button>
-          <button className="profile-button" onClick={() => setShowProfile(true)} title={displayName || "Set your display name"}>
-            <span className="avatar">{initial}</span><span className="profile-name">{displayName || "Your profile"}</span><ChevronDown size={15} />
+          <button className="profile-button" onClick={() => user ? setShowProfile(true) : openAuthentication()} title={displayName || "Sign in"}>
+            <span className="avatar">{initial}</span><span className="profile-name">{displayName || "Sign in"}</span><ChevronDown size={15} />
           </button>
         </div>
       </header>
@@ -232,7 +299,7 @@ function App() {
 
         <div className="main-grid">
           <aside className="sidebar" id="community-list">
-            <div className="section-title"><span>YOUR TOUCHLINE</span><button className="icon-btn small" onClick={() => setShowCreate(true)} aria-label="Create community"><Plus size={18} /></button></div>
+            <div className="section-title"><span>YOUR TOUCHLINE</span><button className="icon-btn small" onClick={openCreateCommunity} aria-label="Create community"><Plus size={18} /></button></div>
             <button className={`side-link ${!selected ? "active" : ""}`} onClick={() => setSelectedId(null)}><Club size={17} /> Discover</button>
             <div className="subheading">COMMUNITIES <span>{communities.length}</span></div>
             <div className="community-menu">
@@ -247,7 +314,7 @@ function App() {
               })}
               {!loading && filtered.length === 0 && <p className="empty-sidebar">No communities match that search.</p>}
             </div>
-            <button className="create-link" onClick={() => setShowCreate(true)}><span><Plus size={16} /></span> Start a community</button>
+            <button className="create-link" onClick={openCreateCommunity}><span><Plus size={16} /></span> Start a community</button>
             <div className="sidebar-card">
               <div className="sidebar-card-icon"><Sparkles size={18} /></div>
               <b>This is your space.</b>
@@ -262,7 +329,7 @@ function App() {
               <div className="discover-view">
                 <div className="content-heading">
                   <div><div className="eyebrow dark">THE WORLD OF WOMEN'S FOOTBALL</div><h2>Find your <em>people.</em></h2><p>Big match energy. Little moments. All of it belongs here.</p></div>
-                  <button className="outline-button" onClick={() => setShowCreate(true)}><Plus size={16} /> Create a community</button>
+                  <button className="outline-button" onClick={openCreateCommunity}><Plus size={16} /> Create a community</button>
                 </div>
                 <div className="stats-strip"><div><strong>{communities.length.toString().padStart(2, "0")}</strong><span>COMMUNITIES</span></div><i /><div><strong>{communities.reduce((total, item) => total + item.memberCount, 0).toString().padStart(2, "0")}</strong><span>FANS ON THE TOUCHLINE</span></div><div className="stats-note">Your club. Your people. <b>Your game.</b></div></div>
                 <div className="discover-label"><span>THE FAN SECTIONS</span><span>{filtered.length} COMMUNITIES <ArrowDownRight size={13} /></span></div>
@@ -278,7 +345,7 @@ function App() {
                     {!filtered.length && <div className="no-results">No communities found. Start one for your team.</div>}
                   </div>
                 )}
-                <div className="bottom-banner"><span className="banner-star">✳</span><div><b>There's room for one more.</b><p>Don't see your team? Bring your people together.</p></div><button onClick={() => setShowCreate(true)}>Start a community <ArrowRight size={15} /></button></div>
+                <div className="bottom-banner"><span className="banner-star">✳</span><div><b>There's room for one more.</b><p>Don't see your team? Bring your people together.</p></div><button onClick={openCreateCommunity}>Start a community <ArrowRight size={15} /></button></div>
               </div>
             ) : (
               <div className="feed-view">
@@ -316,7 +383,33 @@ function App() {
 
       {message && <div className="toast" role="status">{message}<button onClick={() => setMessage("")} aria-label="Dismiss"><X size={15} /></button></div>}
       {showCreate && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowCreate(false); }}><form className="modal" onSubmit={(event) => void createCommunity(event)}><button type="button" className="modal-close" onClick={() => setShowCreate(false)} aria-label="Close"><X size={19} /></button><div className="modal-icon"><Plus size={20} /></div><div className="eyebrow dark">MAKE SOME ROOM IN THE STANDS</div><h2>Start your <em>fan section.</em></h2><p>Every club deserves a place to call home. Get your people together.</p><label>COMMUNITY NAME<input autoFocus name="name" placeholder="e.g. Arsenal Women" maxLength={80} required /></label><label>WHAT'S THIS COMMUNITY ABOUT?<textarea name="description" placeholder="Tell fans what brings this community together..." maxLength={500} required /></label><button className="modal-submit" disabled={saving}>{saving ? "Creating..." : "Create your community"} <ArrowRight size={16} /></button></form></div>}
-      {showProfile && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowProfile(false); }}><form className="modal profile-modal" onSubmit={(event) => { event.preventDefault(); rememberName(displayName); }}><button type="button" className="modal-close" onClick={() => setShowProfile(false)} aria-label="Close"><X size={19} /></button><div className="modal-icon"><LogIn size={20} /></div><div className="eyebrow dark">WELCOME TO THE TOUCHLINE</div><h2>What should we <em>call you?</em></h2><p>Pick a display name to join communities, post and comment. This demo saves it on this device.</p><label>YOUR DISPLAY NAME<input autoFocus value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={40} placeholder="e.g. Alex" required /></label><button className="modal-submit">Save my name <ArrowRight size={16} /></button><small className="demo-notice">Demo identity only — no account or password yet.</small></form></div>}
+      {showProfile && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setShowProfile(false); }}>
+        <div className="modal profile-modal">
+          <button type="button" className="modal-close" onClick={() => setShowProfile(false)} aria-label="Close"><X size={19} /></button>
+          <div className="modal-icon"><LogIn size={20} /></div>
+          {user ? <>
+            <div className="eyebrow dark">YOUR TOUCHLINE ACCOUNT</div>
+            <h2>Good to have you, <em>{user.displayName}.</em></h2>
+            <p>{user.email}</p>
+            <button type="button" className="modal-submit" onClick={() => void signOut()}>Sign out <ArrowRight size={16} /></button>
+          </> : <>
+            <div className="eyebrow dark">WELCOME TO THE TOUCHLINE</div>
+            <h2>{authMode === "register" ? <>Join the <em>community.</em></> : <>Welcome <em>back.</em></>}</h2>
+            <p>{authMode === "register" ? "Create an account to find your people and join the conversation." : "Sign in to pick up where you left off."}</p>
+            <div className="auth-tabs">
+              <button type="button" className={authMode === "login" ? "active" : ""} onClick={() => setAuthMode("login")}>Sign in</button>
+              <button type="button" className={authMode === "register" ? "active" : ""} onClick={() => setAuthMode("register")}>Create account</button>
+            </div>
+            <form key={authMode} onSubmit={(event) => void submitAuthentication(event)}>
+              {authMode === "register" && <label>DISPLAY NAME<input autoFocus name="displayName" maxLength={40} placeholder="e.g. Alex" autoComplete="nickname" required /></label>}
+              <label>EMAIL ADDRESS<input autoFocus={authMode === "login"} name="email" type="email" maxLength={254} placeholder="you@example.com" autoComplete="email" required /></label>
+              <label>PASSWORD<input name="password" type="password" minLength={authMode === "register" ? 8 : undefined} maxLength={72} placeholder={authMode === "register" ? "At least 8 characters" : "Your password"} autoComplete={authMode === "register" ? "new-password" : "current-password"} required /></label>
+              <button className="modal-submit" disabled={saving}>{saving ? "Please wait..." : authMode === "register" ? "Create account" : "Sign in"} <ArrowRight size={16} /></button>
+            </form>
+            <small className="demo-notice">Passwords are stored as BCrypt hashes; sign-in uses a secure server session.</small>
+          </>}
+        </div>
+      </div>}
     </div>
   );
 }

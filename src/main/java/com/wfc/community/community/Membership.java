@@ -1,5 +1,6 @@
 package com.wfc.community.community;
 
+import com.wfc.community.auth.UserAccount;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -15,10 +16,10 @@ import org.hibernate.annotations.CreationTimestamp;
 
 @Entity
 @Table(
-        name = "community_memberships",
+        name = "user_community_memberships",
         uniqueConstraints = @UniqueConstraint(
-                name = "uk_membership_community_name",
-                columnNames = {"community_id", "display_name"}))
+                name = "uk_membership_community_user",
+                columnNames = {"community_id", "user_id"}))
 public class Membership {
 
     @Id
@@ -29,8 +30,9 @@ public class Membership {
     @JoinColumn(name = "community_id", nullable = false)
     private Community community;
 
-    @Column(name = "display_name", nullable = false, length = 40)
-    private String displayName;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false)
+    private UserAccount user;
 
     @CreationTimestamp
     @Column(nullable = false, updatable = false)
@@ -39,9 +41,9 @@ public class Membership {
     protected Membership() {
     }
 
-    Membership(Community community, String displayName) {
+    Membership(Community community, UserAccount user) {
         this.community = community;
-        this.displayName = displayName;
+        this.user = user;
     }
 
     public UUID getId() {
@@ -53,7 +55,11 @@ public class Membership {
     }
 
     public String getDisplayName() {
-        return displayName;
+        return user.getDisplayName();
+    }
+
+    public UserAccount getUser() {
+        return user;
     }
 
     public Instant getJoinedAt() {

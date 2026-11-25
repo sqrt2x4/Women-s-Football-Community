@@ -1,5 +1,7 @@
 package com.wfc.community.post;
 
+import com.wfc.community.auth.UserAccount;
+import com.wfc.community.auth.UserAccountRepository;
 import com.wfc.community.community.MembershipRepository;
 import java.util.List;
 import java.util.UUID;
@@ -14,14 +16,17 @@ class CommentService {
     private final CommentRepository commentRepository;
     private final PostRepository postRepository;
     private final MembershipRepository membershipRepository;
+    private final UserAccountRepository userAccountRepository;
 
     CommentService(
             CommentRepository commentRepository,
             PostRepository postRepository,
-            MembershipRepository membershipRepository) {
+            MembershipRepository membershipRepository,
+            UserAccountRepository userAccountRepository) {
         this.commentRepository = commentRepository;
         this.postRepository = postRepository;
         this.membershipRepository = membershipRepository;
+        this.userAccountRepository = userAccountRepository;
     }
 
     @Transactional(readOnly = true)
@@ -33,15 +38,15 @@ class CommentService {
     }
 
     @Transactional
-    CommentResponse create(UUID postId, CommentRequest request) {
+    CommentResponse create(UUID postId, CommentRequest request, String email) {
         Post post = ensurePostExists(postId);
-        String authorName = request.authorName().trim();
-        if (!membershipRepository.existsByCommunityIdAndDisplayNameIgnoreCase(
-                post.getCommunity().getId(), authorName)) {
+        UserAccount user = userAccountRepository.findByEmail(email)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Not authenticated"));
+        if (!membershipRepository.existsByCommunityIdAndUserId(post.getCommunity().getId(), user.getId())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Join the community before commenting");
         }
         Comment comment = commentRepository.saveAndFlush(
-                new Comment(post, authorName, request.content().trim()));
+                new Comment(post, user, request.content().trim()));
         return CommentResponse.from(comment);
     }
 

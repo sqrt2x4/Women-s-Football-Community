@@ -231,6 +231,9 @@ button { color: inherit; cursor: pointer; }
 .modal label textarea { min-height:80px; resize:vertical; }
 .modal-submit { width:100%; margin-top:18px; padding:11px; display:flex; justify-content:center; align-items:center; gap:8px; border:0; border-radius:4px; color:#fff; background:#583476; font-size:10px; font-weight:700; }
 .demo-notice { display:block; margin-top:10px; text-align:center; color:#a09aa4; font-size:8px; }
+.auth-tabs { margin:16px 0 7px; padding:3px; display:grid; grid-template-columns:1fr 1fr; border-radius:5px; background:#f4f1f5; }
+.auth-tabs button { padding:8px; border:0; border-radius:4px; color:#827a87; background:transparent; font-size:9px; font-weight:700; }
+.auth-tabs button.active { color:#573675; background:#fff; box-shadow:0 1px 4px #27143a14; }
 
 @media (max-width:1080px) {
   .main-grid { grid-template-columns:190px minmax(0,1fr); gap:22px; }

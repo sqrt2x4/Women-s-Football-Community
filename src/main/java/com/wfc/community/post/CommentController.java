@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 
 @RestController
 @RequestMapping("/api/posts/{postId}/comments")
@@ -29,8 +31,10 @@ class CommentController {
 
     @PostMapping
     ResponseEntity<CommentResponse> create(
-            @PathVariable UUID postId, @Valid @RequestBody CommentRequest request) {
-        CommentResponse created = commentService.create(postId, request);
+            @PathVariable UUID postId,
+            @Valid @RequestBody CommentRequest request,
+            @AuthenticationPrincipal UserDetails principal) {
+        CommentResponse created = commentService.create(postId, request, principal.getUsername());
         return ResponseEntity.created(URI.create("/api/posts/" + postId + "/comments/" + created.id()))
                 .body(created);
     }

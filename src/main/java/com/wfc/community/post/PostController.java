@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 
 @RestController
 @RequestMapping("/api/communities/{communityId}/posts")
@@ -29,8 +31,10 @@ class PostController {
 
     @PostMapping
     ResponseEntity<PostResponse> create(
-            @PathVariable UUID communityId, @Valid @RequestBody PostRequest request) {
-        PostResponse created = postService.create(communityId, request);
+            @PathVariable UUID communityId,
+            @Valid @RequestBody PostRequest request,
+            @AuthenticationPrincipal UserDetails principal) {
+        PostResponse created = postService.create(communityId, request, principal.getUsername());
         return ResponseEntity.created(URI.create("/api/posts/" + created.id())).body(created);
     }
 }

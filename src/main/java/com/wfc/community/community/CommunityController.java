@@ -12,7 +12,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 
 @RestController
 @RequestMapping("/api/communities")
@@ -42,15 +43,20 @@ class CommunityController {
 
     @PostMapping("/{id}/memberships")
     ResponseEntity<MembershipResponse> join(
-            @PathVariable UUID id, @Valid @RequestBody MembershipRequest request) {
-        MembershipResponse membership = communityService.join(id, request);
+            @PathVariable UUID id, @AuthenticationPrincipal UserDetails principal) {
+        MembershipResponse membership = communityService.join(id, principal.getUsername());
         return ResponseEntity.created(URI.create("/api/communities/" + id + "/memberships/" + membership.id()))
                 .body(membership);
     }
 
     @DeleteMapping("/{id}/memberships")
-    ResponseEntity<Void> leave(@PathVariable UUID id, @RequestParam String displayName) {
-        communityService.leave(id, displayName);
+    ResponseEntity<Void> leave(@PathVariable UUID id, @AuthenticationPrincipal UserDetails principal) {
+        communityService.leave(id, principal.getUsername());
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/memberships/mine")
+    List<UUID> findMyMemberships(@AuthenticationPrincipal UserDetails principal) {
+        return communityService.findMembershipIds(principal.getUsername());
     }
 }
